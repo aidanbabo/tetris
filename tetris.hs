@@ -23,10 +23,22 @@ backgroundColor = white
 ticksPerSecond = 3
 
 -- Data Types
+
+-- Tetris Game containing:
+--  Random number generator
+--  Falling Piece
+--  Bricks on the groud
 data Tetris = Tetris StdGen Piece [Brick] deriving Show
 
+-- Falling Piece containing:
+--  Center
+--  The bricks is is composed of
 data Piece = Piece Point [Brick] deriving Show
 
+-- A Brick containing:
+--  X position
+--  Y position
+--  Color
 data Brick = Brick Float Float Color deriving Show
 
 type PosMap = Float -> Float
@@ -59,61 +71,65 @@ rotCcw t = rot t rotBrickCcw
 rotCw :: Tetris -> Tetris
 rotCw t = rot t rotBrickCw
 
+-- Rotates the piece if it can
 rot :: Tetris -> ((Float,Float) -> [Brick] -> Brick -> Maybe Brick) -> Tetris
-rot t@(Tetris g p gbs) f = fromMaybe t $ fmap (\p -> Tetris g p gbs) $ r f p gbs
-    where r f (Piece c bricks) gbs = liftM (\bricks -> Piece c bricks) $ sequence $ map (f c gbs) bricks
+rot t@(Tetris g p gbs) f = fromMaybe t $ fmap (\p -> Tetris g p gbs) $ rotPiece f p gbs
 
--- making fun of stupid racket he he
+-- Rotates the bricks in the piece, returning Nothing if it cannot rotate them
+rotPiece :: ((Float,Float) -> [Brick] -> Brick -> Maybe Brick) -> Piece -> [Brick] -> Maybe Piece
+rotPiece f (Piece c bricks) gbs = liftM (\bricks -> Piece c bricks) $ sequence $ map (f c gbs) bricks
+
 rotBrickCcw :: (Float, Float) -> [Brick] -> Brick -> Maybe Brick
-rotBrickCcw (cx,cy) gbs (Brick x y c) = checkBrick ( 
-                                          Brick ((+) cx 
-                                               ((-) cy 
-                                                    y)) 
-                                          ((+) cy 
-                                               ((-) x 
-                                                    cx)) 
-                                          c)
-                                          gbs
+rotBrickCcw (cx,cy) gbs (Brick x y c) = checkBrick (Brick (cx + (cy - y)) (cy + (x - cx)) c) gbs
 
--- Might want to make this real, Also might return None more than once
 rotBrickCw :: (Float, Float) -> [Brick] -> Brick -> Maybe Brick
-rotBrickCw c gbs b = rotBrickCcw c gbs b >>= (rotBrickCcw c gbs) >>= (rotBrickCcw c gbs)
+rotBrickCw  (cx,cy) gbs (Brick x y c) = checkBrick (Brick (cx - (cy - y)) (cy - (x - cx)) c) gbs
 
 -- Piece Movement
-fallMax :: Tetris -> Tetris
-fallMax (Tetris g p gbs) = nextPiece $ Tetris g np gbs
-    where np = last $ p : (catMaybes $ takeWhile isJust $ iterate (\p -> p >>= (flip fall) gbs) (Just p))
 
+-- Moves the pieces to the bottom
+fallMax :: Tetris -> Tetris
+fallMax t@(Tetris g oldPiece gbs) = case nextPiece $ Tetris g newPiece gbs of
+                                    Just t -> t
+                                    Nothing -> t
+    where newPiece = last $ oldPiece : (catMaybes $ takeWhile isJust $ iterate (\p -> p >>= (flip fall) gbs) (Just oldPiece))
+
+-- Moves the piece if it can
 move :: Tetris -> PosMap -> PosMap -> Tetris
 move t@(Tetris gen p gbs) f g = fromMaybe t $ fmap (\p -> Tetris gen p gbs) $ movePiece p gbs f g
 
+-- Moves the piece if it can, returning Nothing if it cannot be moved
 movePiece :: Piece -> [Brick] -> PosMap -> PosMap -> Maybe Piece
 movePiece (Piece (cx,cy) bricks) gbs fx fy = liftM (\bricks -> Piece (fx cx, fy cy) bricks) $ sequence $ map (moveBrick fx fy gbs) bricks
 
--- Falling and Clearing and such
+-- Makes the piece fall, creating a new one if it reaches the floor
 toNextModel :: Float -> Tetris -> Tetris
 toNextModel _ t@(Tetris g p gbs) = case fall p gbs of
                                  Just p -> Tetris g p gbs
-                                 Nothing -> nextPiece t
+                                 Nothing -> case nextPiece t of
+                                              Just t -> t
+                                              Nothing -> t
 
-nextPiece :: Tetris -> Tetris
+-- Creates new piece and clears rows if needed
+nextPiece :: Tetris -> Maybe Tetris
 nextPiece (Tetris g (Piece _ pbs) bs) = let (p, g') = randomFallingPiece g 
-                                         in clearRows $ Tetris g' p (bs ++ pbs)
+                                            gbs = bs ++ pbs
+                                         in Just $ clearRows $ Tetris g' p gbs
+                                         -- in fmap (const $ clearRows $ Tetris g' p gbs) $ sequence $ map ((flip checkBrick) gbs) pbs
 
--- filter based on row number, and if length is 9, remove bricks and shift all others down
+-- Calls clearRow for every row
 clearRows :: Tetris -> Tetris
-clearRows (Tetris g p gbs) = let newGbs = applyThroughList (reverse [1..gridHeight]) clearRow gbs in Tetris g p newGbs
+clearRows (Tetris g p gbs) = Tetris g p (foldr clearRow gbs [0..gridHeight]) 
 
-applyThroughList :: [a] -> ([b] -> a -> [b]) -> [b] -> [b]
-applyThroughList (x:xs) f l = applyThroughList xs f (f l x)
-applyThroughList [] f l = l
+-- Clears the given row if it should be cleared
+clearRow :: Int -> [Brick] -> [Brick]
+clearRow row bs = if (==gridWidth) $ length $ filter (\(Brick _ y _) -> round y == row) bs then removeRow bs row else bs
 
-clearRow :: [Brick] -> Int -> [Brick]
-clearRow bs row = if (==gridWidth) $ length $ filter (\(Brick _ y _) -> round y == row) bs then removeRow bs row else bs
-
+-- Removes bricks from given row and moves bricks above down
 removeRow :: [Brick] -> Int -> [Brick]
 removeRow bs row = map (\b@(Brick x y c) -> if round y > row then Brick x (y - 1) c else b) $ filter (\(Brick _ y _) -> round y /= row) bs
 
+-- Generates a random falling piece
 randomFallingPiece :: StdGen -> (Piece, StdGen)
 randomFallingPiece g = let (pieceType, g') = randRangeInt (0, 6) g in
                          piece g' pieceType 
@@ -128,17 +144,18 @@ randomFallingPiece g = let (pieceType, g') = randRangeInt (0, 6) g in
 randRangeInt :: (Int, Int) -> StdGen -> (Int, StdGen)
 randRangeInt g r = randomR g r
 
+-- Makes the piece fall one block
+-- If it collides with existing bricks, Nothing is returned
 fall :: Piece -> [Brick] -> Maybe Piece
 fall (Piece (cx,cy) bricks) gbs = liftM (\bricks -> Piece (cx,cy-1) bricks) $ sequence $ map (moveBrick id (subtract 1) gbs) bricks
 
+-- Moves the brick according to the position maps
+-- If it collides with existing bricks, Nothing is returned
 moveBrick :: PosMap -> PosMap -> [Brick] -> Brick -> Maybe Brick
 moveBrick fx fy gbs (Brick x y c) = checkBrick (Brick (fx x) (fy y) c) gbs
 
 checkBrick :: Brick -> [Brick] -> Maybe Brick
-checkBrick b@(Brick x y c) gbs = if x < 0 || x >= 10 || y < 0 || y >= 19 || any (sameLocation b) gbs then 
-                                Nothing
-                            else
-                                Just $ Brick x y c 
+checkBrick b@(Brick x y c) gbs = if x < 0 || x >= 10 || y < 0 || y >= 19 || any (sameLocation b) gbs then Nothing else Just $ Brick x y c 
 
 sameLocation :: Brick -> Brick -> Bool
 sameLocation (Brick x1 y1 _) (Brick x2 y2 _) = x1 == x2 && y1 == y2
@@ -158,7 +175,7 @@ brickToView (Brick x y c) = Translate (-windowWidth / 2) (-windowHeight / 2) $ C
                      , (x * squareSize, (y+1) * squareSize) 
                      ]
 
--- Functionts to create the different pieces
+-- Functions to create the different pieces
 o :: Float -> Float -> Piece
 o x y = Piece (x+0.5, y+0.5) $ shiftsToBricks green x y [(id,id), ((+1),id), ((+1),(+1)), (id,(+1))]
 
@@ -180,5 +197,6 @@ z x y = Piece (x+1.0, y) $ shiftsToBricks rose x y [(id,(+1)), ((+1),(+1)), ((+1
 s :: Float -> Float -> Piece
 s x y = Piece (x+1.0, y) $ shiftsToBricks red x y [(id,id), ((+1),(+1)), ((+1),id), ((+2),(+1))] 
 
+-- Utility function to convert relative positions to colored bricks
 shiftsToBricks :: Color -> Float -> Float -> [(PosMap, PosMap)] -> [Brick]
 shiftsToBricks c x y shifts = map (\(fx,fy) -> Brick (fx x) (fy y) c) shifts
