@@ -15,8 +15,8 @@ import System.Random
 squareSize = 30
 gridHeight = 20
 gridWidth = 10
-windowHeight = squareSize * gridHeight
-windowWidth = squareSize * gridWidth
+windowHeight = squareSize * fromIntegral gridHeight
+windowWidth = squareSize * fromIntegral gridWidth
 
 window = InWindow "Tetris" (floor windowWidth, floor windowHeight) (10, 10)
 backgroundColor = white
@@ -100,8 +100,19 @@ nextPiece :: Tetris -> Tetris
 nextPiece (Tetris g (Piece _ pbs) bs) = let (p, g') = randomFallingPiece g 
                                          in clearRows $ Tetris g' p (bs ++ pbs)
 
+-- filter based on row number, and if length is 9, remove bricks and shift all others down
 clearRows :: Tetris -> Tetris
-clearRows t@(Tetris g p gbs) = t
+clearRows (Tetris g p gbs) = let newGbs = applyThroughList (reverse [1..gridHeight]) clearRow gbs in Tetris g p newGbs
+
+applyThroughList :: [a] -> ([b] -> a -> [b]) -> [b] -> [b]
+applyThroughList (x:xs) f l = applyThroughList xs f (f l x)
+applyThroughList [] f l = l
+
+clearRow :: [Brick] -> Int -> [Brick]
+clearRow bs row = if (==gridWidth) $ length $ filter (\(Brick _ y _) -> round y == row) bs then removeRow bs row else bs
+
+removeRow :: [Brick] -> Int -> [Brick]
+removeRow bs row = map (\b@(Brick x y c) -> if round y > row then Brick x (y - 1) c else b) $ filter (\(Brick _ y _) -> round y /= row) bs
 
 randomFallingPiece :: StdGen -> (Piece, StdGen)
 randomFallingPiece g = let (pieceType, g') = randRangeInt (0, 6) g in
@@ -161,13 +172,13 @@ j :: Float -> Float -> Piece
 j x y = Piece (x+1.0, y+0.0) $ shiftsToBricks cyan x y [(id,id), ((+1),id), ((+2),id), (id,(+1))] 
 
 t :: Float -> Float -> Piece
-t x y = Piece (x+1.0, y+0.5) $ shiftsToBricks orange x y [(id,id), ((+1),id), ((+2),id), ((+1),(+1))] 
+t x y = Piece (x+1.5, y+0.5) $ shiftsToBricks orange x y [(id,id), ((+1),id), ((+2),id), ((+1),(+1))] 
 
 z :: Float -> Float -> Piece
-z x y = Piece (x+1.0, y+0.5) $ shiftsToBricks rose x y [(id,(+1)), ((+1),(+1)), ((+1),id), ((+2),id)] 
+z x y = Piece (x+1.0, y) $ shiftsToBricks rose x y [(id,(+1)), ((+1),(+1)), ((+1),id), ((+2),id)] 
 
 s :: Float -> Float -> Piece
-s x y = Piece (x+1.0, y+0.5) $ shiftsToBricks red x y [(id,id), ((+1),(+1)), ((+1),id), ((+2),(+1))] 
+s x y = Piece (x+1.0, y) $ shiftsToBricks red x y [(id,id), ((+1),(+1)), ((+1),id), ((+2),(+1))] 
 
 shiftsToBricks :: Color -> Float -> Float -> [(PosMap, PosMap)] -> [Brick]
 shiftsToBricks c x y shifts = map (\(fx,fy) -> Brick (fx x) (fy y) c) shifts
